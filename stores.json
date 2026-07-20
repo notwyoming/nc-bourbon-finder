@@ -1,0 +1,119 @@
+{
+  "Asheville ABC Board": {
+    "single_store": false,
+    "stores": [
+      {
+        "address": "205 Louisiana Ave Asheville, NC 28806",
+        "phone": "828-254-6613"
+      },
+      {
+        "address": "807 Merrimon Ave Asheville, NC 28804",
+        "phone": "828-254-6531"
+      },
+      {
+        "address": "145 Tunnel Rd Asheville, NC 28805",
+        "phone": "828-254-6479"
+      },
+      {
+        "address": "75 Long Shoals Rd Asheville, NC 28803",
+        "phone": "828-687-3777"
+      },
+      {
+        "address": "50 Asbury Rd Candler, NC 28715",
+        "phone": "828-665-7011"
+      },
+      {
+        "address": "650 Hendersonville Rd Asheville, NC 28803",
+        "phone": "828-505-3710"
+      },
+      {
+        "address": "337 New Leicester Hwy Asheville, NC 28806",
+        "phone": "828-271-4001"
+      },
+      {
+        "address": "3933 Sweeten Creek Rd Arden, NC 28704",
+        "phone": "828 687-7061"
+      }
+    ]
+  },
+  "Black Mountain ABC Board": {
+    "single_store": true,
+    "stores": [
+      {
+        "address": "207 NC Hwy 9 Black Mountain, NC 28711",
+        "phone": "828-669-2385"
+      }
+    ]
+  },
+  "Brevard ABC Board": {
+    "single_store": false,
+    "stores": [
+      {
+        "address": "350-A North Broad St Brevard, NC 28712",
+        "phone": "828-883-8128"
+      },
+      {
+        "address": "61 Forest Gate Drive Pisgah Forest, NC 28768",
+        "phone": "828-883-8168"
+      }
+    ]
+  },
+  "Canton ABC Board": {
+    "single_store": true,
+    "stores": [
+      {
+        "address": "768 New Clyde Hwy - Suite 200 Canton, NC 28716",
+        "phone": "828-648-7263"
+      }
+    ]
+  },
+  "Fletcher ABC Board": {
+    "single_store": true,
+    "stores": [
+      {
+        "address": "37 Rockwood Rd (* I-26 Airport Exit *) Fletcher, NC 28732",
+        "phone": "828-684-4212"
+      }
+    ]
+  },
+  "Marion ABC Board": {
+    "single_store": false,
+    "stores": [
+      {
+        "address": "484 E. Court St Marion, NC 28752",
+        "phone": "828-652-8770"
+      },
+      {
+        "address": "2961 Hwy 221 N Marion, NC 28752",
+        "phone": "828-652-5328"
+      }
+    ]
+  },
+  "Waynesville ABC Board": {
+    "single_store": true,
+    "stores": [
+      {
+        "address": "52 Dayco Dr Waynesville, NC 28786",
+        "phone": "828-452-4444"
+      }
+    ]
+  },
+  "Weaverville ABC Board": {
+    "single_store": true,
+    "stores": [
+      {
+        "address": "7 Northridge Commons Pkwy, Ste 101 Weaverville, NC 28787",
+        "phone": "828-645-3399"
+      }
+    ]
+  },
+  "Woodfin ABC Board": {
+    "single_store": true,
+    "stores": [
+      {
+        "address": "142 Weaverville Rd Woodfin, NC 28804",
+        "phone": "828-658-9300"
+      }
+    ]
+  }
+}

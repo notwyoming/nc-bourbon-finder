@@ -20,12 +20,14 @@ from pathlib import Path
 
 FEED_URL = "https://abc2.nc.gov/Search/StockShippedData"
 HUMAN_URL = "https://abc2.nc.gov/Search/StockShipped"
+LOCATOR_URL = "https://abc2.nc.gov/Search/ABCStoreLocator"
 USER_AGENT = "nc-bourbon-finder (github actions cron)"
 FETCH_TIMEOUT = 30
 
 ROOT = Path(__file__).resolve().parent
 CONFIG_PATH = ROOT / "config.toml"
 STATE_PATH = ROOT / "state" / "latest.json"
+STORES_PATH = ROOT / "stores.json"
 
 
 def load_config():
@@ -54,7 +56,10 @@ def validate_config(feed, products, boards):
     if bad_codes or bad_boards:
         msgs = []
         if bad_codes:
-            msgs.append(f"unknown product codes: {bad_codes}")
+            hint = ""
+            if any(len(c) != 5 for c in bad_codes):
+                hint = " (codes must be 5-digit zero-padded, e.g. code 124 -> \"00124\")"
+            msgs.append(f"unknown product codes: {bad_codes}{hint}")
         if bad_boards:
             msgs.append(f"unknown boards: {bad_boards}")
         die("; ".join(msgs))
@@ -65,6 +70,33 @@ def load_state():
         return None
     with STATE_PATH.open() as f:
         return json.load(f)
+
+
+def load_stores():
+    """Optional board -> store map (from the state store locator). Missing file
+    just disables store-level enrichment."""
+    if not STORES_PATH.exists():
+        return {}
+    with STORES_PATH.open() as f:
+        return json.load(f)
+
+
+def store_hint(board, stores):
+    """A short store-level suffix for an alert line.
+
+    Single-store boards resolve to the exact store+phone (board == store).
+    Multi-store boards can't be resolved from the board-level feed, so we say
+    how many stores and point at the locator."""
+    info = stores.get(board)
+    if not info:
+        return ""
+    if info["single_store"] and info["stores"]:
+        s = info["stores"][0]
+        return f" @ {s['address']} ({s['phone']})"
+    n = len(info["stores"])
+    if n > 1:
+        return f" (1 of {n} stores - which one TBD, see locator)"
+    return ""
 
 
 def write_state(extract_datetime, units):
@@ -113,17 +145,23 @@ def diff(current, state, products, watched_boards):
     return hits
 
 
-def format_email(hits, extract_datetime):
+def format_email(hits, extract_datetime, stores=None):
+    stores = stores or {}
     lead = hits[0]
     subject = f"NC ABC: {lead['label']} +{lead['delta']} at {short_board(lead['board'])}"
     if len(hits) > 1:
         subject += f" (+{len(hits) - 1} more)"
     lines = [
         f"{h['label']} - {h['board']}: +{h['delta']} (now {h['total']} bottles)"
+        f"{store_hint(h['board'], stores)}"
         for h in hits
     ]
     body = "\n".join(lines)
-    body += f"\n\nExtract: {extract_datetime}\n{HUMAN_URL}\n"
+    body += f"\n\nExtract: {extract_datetime}\n{HUMAN_URL}"
+    # Only point at the locator when we actually know a hit is multi-store.
+    if any(h["board"] in stores and not stores[h["board"]]["single_store"] for h in hits):
+        body += f"\nStore locator: {LOCATOR_URL}"
+    body += "\n"
     return subject, body
 
 
@@ -214,7 +252,7 @@ def main():
         return
 
     if hits:
-        subject, body = format_email(hits, extract_datetime)
+        subject, body = format_email(hits, extract_datetime, load_stores())
         if args.dry_run:
             print(f"--- would send ---\nSubject: {subject}\n\n{body}")
         else:
