@@ -81,33 +81,61 @@ def load_stores():
         return json.load(f)
 
 
-def store_hint(board, stores):
-    """A short store-level suffix for an alert line.
+NOTES = [
+    "This is an automated tool (AI) and can make mistakes. Double-check before you make a trip.",
+    "This is a leading indicator. It fires when the state warehouse ships to the board, "
+    "which is earlier than bottles reaching the shelf. The store may not have received or "
+    "put out the stock yet.",
+    "For single-store boards, the board runs exactly one store, so the address shown is "
+    "where the stock goes. Multi-store boards (like Asheville) can't be narrowed to a "
+    "specific store from this data.",
+]
 
-    Single-store boards resolve to the exact store+phone (board == store).
-    Multi-store boards can't be resolved from the board-level feed, so we say
-    how many stores and point at the locator."""
+
+def store_lines(board, stores):
+    """Store detail lines for a board block.
+
+    Single-store boards resolve to the exact store address + phone (board ==
+    store). Multi-store boards can't be resolved from the board-level feed, so
+    we say how many stores there are and point at the locator."""
     info = stores.get(board)
     if not info:
-        return ""
+        return []
     if info["single_store"] and info["stores"]:
         s = info["stores"][0]
-        return f" @ {s['address']} ({s['phone']})"
+        return [s["address"], f"({s['phone']})"]
     n = len(info["stores"])
     if n > 1:
-        return f" (1 of {n} stores - which one TBD, see locator)"
-    return ""
+        return [f"1 of {n} stores - exact store unknown (see locator below)"]
+    return []
 
 
-def write_state(extract_datetime, units):
+def board_blocks(hits, stores):
+    """Group hits by board, ordered by biggest increase, each with a products
+    summary and store detail lines."""
+    grouped = {}
+    for h in hits:
+        grouped.setdefault(h["board"], []).append(h)
+    ordered = sorted(
+        grouped, key=lambda b: max(x["delta"] for x in grouped[b]), reverse=True
+    )
+    blocks = []
+    for board in ordered:
+        board_hits = sorted(grouped[board], key=lambda x: x["delta"], reverse=True)
+        products = ", ".join(
+            f"+{h['delta']} bottles {h['label']}" for h in board_hits
+        )
+        blocks.append((board, products, store_lines(board, stores)))
+    return blocks
+
+
+def write_state(extract_datetime, units, last_alert_date=None):
+    data = {"extractDatetime": extract_datetime, "units": units}
+    if last_alert_date:
+        data["last_alert_date"] = last_alert_date
     STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
     with STATE_PATH.open("w") as f:
-        json.dump(
-            {"extractDatetime": extract_datetime, "units": units},
-            f,
-            sort_keys=True,
-            indent=2,
-        )
+        json.dump(data, f, sort_keys=True, indent=2)
         f.write("\n")
 
 
@@ -145,31 +173,77 @@ def diff(current, state, products, watched_boards):
     return hits
 
 
+def should_alert(hits, last_alert_date, extract_date):
+    """Send at most one email per extract-date, and only for actual increases.
+    `hits` already contains increases only (see diff)."""
+    return bool(hits) and last_alert_date != extract_date
+
+
 def format_email(hits, extract_datetime, stores=None):
+    """Return (subject, text_body, html_body) for the alert."""
     stores = stores or {}
+    blocks = board_blocks(hits, stores)
     lead = hits[0]
     subject = f"NC ABC: {lead['label']} +{lead['delta']} at {short_board(lead['board'])}"
     if len(hits) > 1:
         subject += f" (+{len(hits) - 1} more)"
-    lines = [
-        f"{h['label']} - {h['board']}: +{h['delta']} (now {h['total']} bottles)"
-        f"{store_hint(h['board'], stores)}"
-        for h in hits
-    ]
-    body = "\n".join(lines)
-    body += f"\n\nExtract: {extract_datetime}\n{HUMAN_URL}"
-    # Only point at the locator when we actually know a hit is multi-store.
-    if any(h["board"] in stores and not stores[h["board"]]["single_store"] for h in hits):
-        body += f"\nStore locator: {LOCATOR_URL}"
-    body += "\n"
-    return subject, body
+    show_locator = any(
+        h["board"] in stores and not stores[h["board"]]["single_store"] for h in hits
+    )
+    return subject, _text_body(blocks, extract_datetime, show_locator), _html_body(
+        blocks, extract_datetime, show_locator
+    )
+
+
+def _text_body(blocks, extract_datetime, show_locator):
+    out = []
+    for board, products, lines in blocks:
+        out.append(board)
+        out.append(products)
+        out.extend(lines)
+        out.append("")
+    out.append("Disclaimers:")
+    out.extend(f"- {n}" for n in NOTES)
+    out.append("")
+    out.append(f"Extract: {extract_datetime}")
+    out.append(f"Shipments: {HUMAN_URL}")
+    if show_locator:
+        out.append(f"Store locator: {LOCATOR_URL}")
+    return "\n".join(out) + "\n"
+
+
+def _html_body(blocks, extract_datetime, show_locator):
+    def esc(s):
+        return (s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+
+    parts = ['<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;color:#111;line-height:1.5;">']
+    for board, products, lines in blocks:
+        parts.append('<div style="margin-bottom:16px;">')
+        parts.append(f'<div style="font-weight:bold;font-size:16px;">{esc(board)}</div>')
+        parts.append(f'<div>{esc(products)}</div>')
+        for ln in lines:
+            parts.append(f'<div>{esc(ln)}</div>')
+        parts.append("</div>")
+    parts.append('<div style="margin-bottom:16px;color:#777;">')
+    parts.append('<div style="font-weight:bold;">Disclaimers:</div>')
+    parts.append('<ul style="padding-left:20px;margin:6px 0;line-height:1.3;">')
+    for n in NOTES:
+        parts.append(f"<li>{esc(n)}</li>")
+    parts.append("</ul></div>")
+    parts.append('<hr style="border:none;border-top:1px solid #ddd;">')
+    parts.append(f'<div style="color:#555;">Extract: {esc(extract_datetime)}</div>')
+    parts.append(f'<div><a href="{HUMAN_URL}">Shipments page</a></div>')
+    if show_locator:
+        parts.append(f'<div><a href="{LOCATOR_URL}">Store locator</a></div>')
+    parts.append("</div>")
+    return "\n".join(parts)
 
 
 def short_board(board):
     return board.replace(" ABC Board", "")
 
 
-def send_email(subject, body):
+def send_email(subject, body, html=None):
     address = require_env("GMAIL_ADDRESS")
     password = require_env("GMAIL_APP_PASSWORD")
     recipients = parse_recipients()
@@ -178,6 +252,8 @@ def send_email(subject, body):
     msg["To"] = ", ".join(recipients)
     msg["Subject"] = subject
     msg.set_content(body)
+    if html:
+        msg.add_alternative(html, subtype="html")
     with smtplib.SMTP("smtp.gmail.com", 587, timeout=FETCH_TIMEOUT) as smtp:
         smtp.starttls()
         smtp.login(address, password)
@@ -251,15 +327,24 @@ def main():
         print("initialized state")
         return
 
+    # One email per extract-date. If a second extract lands the same day, fold
+    # it into the baseline silently rather than send again (accepted: we may
+    # miss an afternoon update).
+    extract_date = extract_datetime[:10]
+    last_alert_date = state.get("last_alert_date")
+
     if hits:
-        subject, body = format_email(hits, extract_datetime, load_stores())
+        subject, body, html = format_email(hits, extract_datetime, load_stores())
         if args.dry_run:
             print(f"--- would send ---\nSubject: {subject}\n\n{body}")
+        elif should_alert(hits, last_alert_date, extract_date):
+            send_email(subject, body, html)
+            last_alert_date = extract_date
         else:
-            send_email(subject, body)
+            print(f"{len(hits)} hit(s) but already alerted on {extract_date}; skipping email")
 
     if not args.dry_run:
-        write_state(extract_datetime, current)
+        write_state(extract_datetime, current, last_alert_date)
 
     print(f"{len(hits)} hit(s); state {'unchanged (dry-run)' if args.dry_run else 'updated'}")
 

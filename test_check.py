@@ -92,32 +92,124 @@ class DiffTests(unittest.TestCase):
         self.assertEqual([h["delta"] for h in hits], [6, 2])
 
 
-class FormatEmailTests(unittest.TestCase):
-    def test_single_hit_subject_and_body(self):
+def hit(code, label, board, delta):
+    return {"code": code, "label": label, "board": board, "delta": delta, "total": delta}
+
+
+SINGLE = {"Woodfin ABC Board": {
+    "single_store": True,
+    "stores": [{"address": "142 Weaverville Rd Woodfin, NC 28804", "phone": "828-658-9300"}]}}
+MULTI = {"Asheville ABC Board": {
+    "single_store": False, "stores": [{"address": "a"}, {"address": "b"}]}}
+
+
+class BoardBlocksTests(unittest.TestCase):
+    def test_products_grouped_on_one_line_per_board(self):
         hits = [
-            {"code": "27169", "label": "Eagle Rare 10Y",
-             "board": "Asheville ABC Board", "delta": 2, "total": 12}
+            hit("27169", "Eagle Rare 10Y", "Woodfin ABC Board", 6),
+            hit("27090", "Blanton's Single Barrel", "Woodfin ABC Board", 4),
         ]
-        subject, body = check.format_email(hits, "2026-07-20 11:03:56")
+        blocks = check.board_blocks(hits, {})
+        self.assertEqual(len(blocks), 1)
+        board, products, _ = blocks[0]
+        self.assertEqual(board, "Woodfin ABC Board")
+        self.assertEqual(
+            products, "+6 bottles Eagle Rare 10Y, +4 bottles Blanton's Single Barrel")
+
+    def test_boards_ordered_by_biggest_increase(self):
+        hits = [
+            hit("27169", "Eagle Rare 10Y", "Woodfin ABC Board", 2),
+            hit("27169", "Eagle Rare 10Y", "Asheville ABC Board", 8),
+        ]
+        blocks = check.board_blocks(hits, {})
+        self.assertEqual([b[0] for b in blocks],
+                         ["Asheville ABC Board", "Woodfin ABC Board"])
+
+
+class StoreLinesTests(unittest.TestCase):
+    def test_single_store_resolves_to_address_and_phone(self):
+        self.assertEqual(
+            check.store_lines("Woodfin ABC Board", SINGLE),
+            ["142 Weaverville Rd Woodfin, NC 28804", "(828-658-9300)"])
+
+    def test_multi_store_says_count_not_address(self):
+        self.assertEqual(
+            check.store_lines("Asheville ABC Board", MULTI),
+            ["1 of 2 stores - exact store unknown (see locator below)"])
+
+    def test_unknown_board_has_no_store_lines(self):
+        self.assertEqual(check.store_lines("Nowhere ABC Board", {}), [])
+
+
+class FormatEmailTests(unittest.TestCase):
+    def test_returns_subject_text_and_html(self):
+        hits = [hit("27169", "Eagle Rare 10Y", "Asheville ABC Board", 2)]
+        subject, text, html = check.format_email(hits, "2026-07-20 11:03:56")
         self.assertEqual(subject, "NC ABC: Eagle Rare 10Y +2 at Asheville")
-        self.assertIn("Eagle Rare 10Y - Asheville ABC Board: +2 (now 12 bottles)", body)
-        self.assertIn("Extract: 2026-07-20 11:03:56", body)
-        self.assertIn(check.HUMAN_URL, body)
+        self.assertIn("+2 bottles Eagle Rare 10Y", text)
+        self.assertNotIn("bottles)", text)  # dropped the "(now X bottles)" total
+        self.assertIn("Extract: 2026-07-20 11:03:56", text)
+        self.assertIn(check.HUMAN_URL, text)
+        self.assertIn("font-weight:bold", html)  # bold board name in the HTML part
 
     def test_multiple_hits_subject_summarizes_count(self):
         hits = [
-            {"code": "27169", "label": "Eagle Rare 10Y",
-             "board": "Woodfin ABC Board", "delta": 6, "total": 6},
-            {"code": "27169", "label": "Eagle Rare 10Y",
-             "board": "Asheville ABC Board", "delta": 2, "total": 12},
+            hit("27169", "Eagle Rare 10Y", "Woodfin ABC Board", 6),
+            hit("27169", "Eagle Rare 10Y", "Asheville ABC Board", 2),
         ]
-        subject, body = check.format_email(hits, "2026-07-20 11:03:56")
+        subject, _, _ = check.format_email(hits, "2026-07-20 11:03:56")
         self.assertEqual(subject, "NC ABC: Eagle Rare 10Y +6 at Woodfin (+1 more)")
-        # 2 hit lines + blank separator + extract line + url line
-        self.assertEqual(len(body.strip().splitlines()), 5)
+
+    def test_disclaimers_appear_above_extract(self):
+        hits = [hit("27169", "Eagle Rare 10Y", "Asheville ABC Board", 2)]
+        _, text, _ = check.format_email(hits, "2026-07-20 11:03:56")
+        self.assertLess(text.index("Disclaimers:"), text.index("Extract:"))
+
+    def test_single_store_hit_shows_address(self):
+        hits = [hit("27090", "Blanton's Single Barrel", "Woodfin ABC Board", 6)]
+        _, text, _ = check.format_email(hits, "2026-07-20 11:03:56", SINGLE)
+        self.assertIn("142 Weaverville Rd Woodfin, NC 28804", text)
+        self.assertNotIn("Store locator:", text)  # no multi-store hit -> no locator
+
+    def test_multi_store_hit_adds_locator_line(self):
+        hits = [hit("27169", "Eagle Rare 10Y", "Asheville ABC Board", 8)]
+        _, text, _ = check.format_email(hits, "2026-07-20 11:03:56", MULTI)
+        self.assertIn("1 of 2 stores", text)
+        self.assertIn(f"Store locator: {check.LOCATOR_URL}", text)
 
     def test_short_board_strips_suffix(self):
         self.assertEqual(check.short_board("Asheville ABC Board"), "Asheville")
+
+
+class ShouldAlertTests(unittest.TestCase):
+    def test_first_ever_alert_sends(self):
+        self.assertTrue(check.should_alert([{"delta": 5}], None, "2026-07-20"))
+
+    def test_new_day_sends(self):
+        self.assertTrue(check.should_alert([{"delta": 5}], "2026-07-19", "2026-07-20"))
+
+    def test_same_day_is_capped(self):
+        self.assertFalse(check.should_alert([{"delta": 5}], "2026-07-20", "2026-07-20"))
+
+    def test_no_hits_never_sends(self):
+        self.assertFalse(check.should_alert([], "2026-07-19", "2026-07-20"))
+
+
+class WriteStateTests(unittest.TestCase):
+    def test_last_alert_date_written_and_omitted_when_none(self):
+        import json
+        import tempfile
+        orig = check.STATE_PATH
+        try:
+            check.STATE_PATH = Path(tempfile.mkdtemp()) / "latest.json"
+            check.write_state("2026-07-20 11:03:56", {"k": 1}, "2026-07-20")
+            with check.STATE_PATH.open() as f:
+                self.assertEqual(json.load(f)["last_alert_date"], "2026-07-20")
+            check.write_state("2026-07-20 11:03:56", {"k": 1}, None)
+            with check.STATE_PATH.open() as f:
+                self.assertNotIn("last_alert_date", json.load(f))
+        finally:
+            check.STATE_PATH = orig
 
 
 class ValidateConfigTests(unittest.TestCase):
