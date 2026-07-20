@@ -1,0 +1,23 @@
+# Watchlists for nc-bourbon-finder.
+# Public file - do NOT put recipient email addresses here (see ALERT_RECIPIENTS secret).
+
+# Exact boardName strings from the feed's lookups.boards.
+# Alerts fire only for these boards; state tracks all boards for watched products.
+# (Root-level key - must come before the [products] table below.)
+boards = [
+  "Asheville ABC Board",
+  "Black Mountain ABC Board",
+  "Weaverville ABC Board",
+  "Woodfin ABC Board",
+  "Fletcher ABC Board",
+  "Brevard ABC Board",
+  "Canton ABC Board",
+  "Waynesville ABC Board",
+  "Marion ABC Board",
+]
+
+[products]
+# 5-digit zero-padded NCcode -> label used in the email subject.
+# Codes must be exactly 5 digits to match the feed (e.g. code 124 -> "00124").
+27169 = "Eagle Rare 10Y"
+27090 = "Blanton's Single Barrel"

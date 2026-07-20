@@ -1,0 +1,40 @@
+name: check
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 10:30a-2:30p ET (EDT) hourly at :30, bracketing the ~11:0x ET extract.
+    # Actions cron is UTC-only; during EST this is 9:30a-1:30p ET (still brackets 11am).
+    # To hold 10:30a-2:30p ET year-round, switch to "30 15-19 * * *" at the fall DST change.
+    - cron: "30 14-18 * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run check
+        env:
+          GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          ALERT_RECIPIENTS: ${{ secrets.ALERT_RECIPIENTS }}
+        run: python check.py
+
+      - name: Commit state if changed
+        run: |
+          if [[ -n "$(git status --porcelain state/latest.json)" ]]; then
+            extract=$(python -c "import json; print(json.load(open('state/latest.json'))['extractDatetime'])")
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add state/latest.json
+            git commit -m "chore(state): extract $extract"
+            git push
+          fi
