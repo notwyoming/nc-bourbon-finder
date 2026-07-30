@@ -225,13 +225,18 @@ class ValidateConfigTests(unittest.TestCase):
         # Should not raise / exit.
         check.validate_config(self._feed(), {"27169": "x"}, ["Asheville ABC Board"])
 
-    def test_unknown_code_exits(self):
-        with self.assertRaises(SystemExit):
-            check.validate_config(self._feed(), {"99999": "x"}, ["Asheville ABC Board"])
+    def test_code_absent_from_extract_passes(self):
+        # lookups.codes only covers what shipped in this extract. A watched
+        # product that didn't ship today is normal, not a config error.
+        check.validate_config(self._feed(), {"99999": "x"}, ["Asheville ABC Board"])
 
-    def test_unknown_board_exits(self):
-        with self.assertRaises(SystemExit):
+    def test_unknown_board_warns_without_exiting(self):
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
             check.validate_config(self._feed(), {"27169": "x"}, ["Nowhere ABC Board"])
+        self.assertIn("Nowhere ABC Board", buf.getvalue())
 
     def test_non_zero_padded_code_hint(self):
         # Code 124 (not "00124") should fail with a padding hint on stderr.

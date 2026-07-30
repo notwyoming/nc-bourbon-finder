@@ -49,20 +49,29 @@ def fetch_feed():
 
 
 def validate_config(feed, products, boards):
-    codes = set(feed["lookups"]["codes"])
+    """Sanity-check config without treating the extract as a catalog.
+
+    `lookups.codes` is only the codes present in the current extract, so a
+    watched product missing from it just means it didn't ship today - the usual
+    case for allocated bourbon. Only code *format* is a real config error.
+    `lookups.boards` is broader than the extract's records but still not
+    guaranteed complete, so an unrecognized board warns rather than killing an
+    otherwise good run.
+    """
+    bad_codes = [c for c in products if len(c) != 5 or not c.isdigit()]
+    if bad_codes:
+        die(
+            f"malformed product codes: {bad_codes} "
+            '(codes must be 5-digit zero-padded, e.g. code 124 -> "00124")'
+        )
     valid_boards = set(feed["lookups"]["boards"])
-    bad_codes = [c for c in products if c not in codes]
-    bad_boards = [b for b in boards if b not in valid_boards]
-    if bad_codes or bad_boards:
-        msgs = []
-        if bad_codes:
-            hint = ""
-            if any(len(c) != 5 for c in bad_codes):
-                hint = " (codes must be 5-digit zero-padded, e.g. code 124 -> \"00124\")"
-            msgs.append(f"unknown product codes: {bad_codes}{hint}")
-        if bad_boards:
-            msgs.append(f"unknown boards: {bad_boards}")
-        die("; ".join(msgs))
+    unknown_boards = [b for b in boards if b not in valid_boards]
+    if unknown_boards:
+        print(
+            f"warning: boards not listed in this extract (typo, or no shipments): "
+            f"{unknown_boards}",
+            file=sys.stderr,
+        )
 
 
 def load_state():
