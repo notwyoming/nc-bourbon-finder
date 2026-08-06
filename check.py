@@ -15,6 +15,7 @@ import smtplib
 import sys
 import tomllib
 import urllib.request
+from datetime import date
 from email.message import EmailMessage
 from pathlib import Path
 
@@ -23,6 +24,10 @@ HUMAN_URL = "https://abc2.nc.gov/Search/StockShipped"
 LOCATOR_URL = "https://abc2.nc.gov/Search/ABCStoreLocator"
 USER_AGENT = "nc-bourbon-finder (github actions cron)"
 FETCH_TIMEOUT = 30
+HEARTBEAT_INTERVAL_DAYS = 7
+# Days the extract may lag `today` before the heartbeat calls the feed stale.
+# The extract lands ~11:04 ET, so a morning run legitimately sees yesterday's.
+HEARTBEAT_STALE_AFTER_DAYS = 1
 
 ROOT = Path(__file__).resolve().parent
 CONFIG_PATH = ROOT / "config.toml"
@@ -138,10 +143,12 @@ def board_blocks(hits, stores):
     return blocks
 
 
-def write_state(extract_datetime, units, last_alert_date=None):
+def write_state(extract_datetime, units, last_alert_date=None, last_heartbeat_date=None):
     data = {"extractDatetime": extract_datetime, "units": units}
     if last_alert_date:
         data["last_alert_date"] = last_alert_date
+    if last_heartbeat_date:
+        data["last_heartbeat_date"] = last_heartbeat_date
     STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
     with STATE_PATH.open("w") as f:
         json.dump(data, f, sort_keys=True, indent=2)
@@ -186,6 +193,63 @@ def should_alert(hits, last_alert_date, extract_date):
     """Send at most one email per extract-date, and only for actual increases.
     `hits` already contains increases only (see diff)."""
     return bool(hits) and last_alert_date != extract_date
+
+
+def heartbeat_recipient():
+    """Sole heartbeat recipient, from the environment.
+
+    Deliberately not in config.toml: that file is public (see its header) and
+    this is a personal address. Unset disables the heartbeat rather than
+    failing the run, so the tool works before the secret is configured.
+    """
+    return os.environ.get("HEARTBEAT_RECIPIENT", "").strip()
+
+
+def should_heartbeat(last_heartbeat_date, today, interval_days=HEARTBEAT_INTERVAL_DAYS):
+    """True when a liveness email is due.
+
+    Interval-based rather than fixed-weekday on purpose: GitHub delays and
+    sometimes drops scheduled runs, so a "is it Tuesday?" rule would skip a
+    whole week whenever Tuesday's run is the one that dies. Here a missed day
+    just sends on the next run that lands. Unparseable state sends rather than
+    skips, so corruption surfaces as noise instead of silence.
+    """
+    if not last_heartbeat_date:
+        return True
+    try:
+        last = date.fromisoformat(last_heartbeat_date)
+    except ValueError:
+        return True
+    return (date.fromisoformat(today) - last).days >= interval_days
+
+
+def format_heartbeat(extract_datetime, today, products, boards, last_alert_date):
+    """Return (subject, body) for the weekly liveness email.
+
+    Also doubles as a stale-feed alarm: if the extract stops advancing, this is
+    the only email that still goes out, so it has to say so loudly.
+    """
+    lag = (date.fromisoformat(today) - date.fromisoformat(extract_datetime[:10])).days
+    stale = lag > HEARTBEAT_STALE_AFTER_DAYS
+    subject = "nc-bourbon-finder: weekly heartbeat"
+    if stale:
+        subject += f" (feed stale {lag}d)"
+    lines = [f"Last extract processed: {extract_datetime}"]
+    if stale:
+        lines.append(
+            f"WARNING: the extract has not advanced in {lag} days. The NC ABC "
+            f"feed may have stopped publishing, or this tool may be stuck."
+        )
+    lines += [
+        f"Watching: {len(products)} products across {len(boards)} boards",
+        f"Last alert: {last_alert_date or 'never'}",
+        "",
+        "No news is good news: alerts only fire when a watched product ships "
+        "to a watched board.",
+        "",
+        f"Shipments: {HUMAN_URL}",
+    ]
+    return subject, "\n".join(lines) + "\n"
 
 
 def format_email(hits, extract_datetime, stores=None):
@@ -252,10 +316,13 @@ def short_board(board):
     return board.replace(" ABC Board", "")
 
 
-def send_email(subject, body, html=None):
+def send_email(subject, body, html=None, recipients=None):
+    """Send via Gmail SMTP. `recipients` defaults to the ALERT_RECIPIENTS list;
+    the heartbeat passes its own single address so the two audiences never
+    bleed into each other."""
     address = require_env("GMAIL_ADDRESS")
     password = require_env("GMAIL_APP_PASSWORD")
-    recipients = parse_recipients()
+    recipients = recipients or parse_recipients()
     msg = EmailMessage()
     msg["From"] = address
     msg["To"] = ", ".join(recipients)
@@ -324,7 +391,35 @@ def main():
     extract_datetime = feed["metadata"]["extractDatetime"]
     state = load_state()
 
+    today = date.today().isoformat()
+    last_alert_date = (state or {}).get("last_alert_date")
+    last_heartbeat_date = (state or {}).get("last_heartbeat_date")
+
+    # Heartbeat is evaluated BEFORE the unchanged-extract short-circuit below.
+    # A feed that stops advancing is exactly the silent failure the heartbeat
+    # exists to report, and returning early would suppress the one email that
+    # could tell us about it.
+    if should_heartbeat(last_heartbeat_date, today):
+        subject, body = format_heartbeat(
+            extract_datetime, today, products, boards, last_alert_date
+        )
+        recipient = heartbeat_recipient()
+        if args.dry_run:
+            print(f"--- would send heartbeat ---\nSubject: {subject}\n\n{body}")
+        elif not recipient:
+            print("heartbeat due but HEARTBEAT_RECIPIENT is unset; skipping")
+        else:
+            send_email(subject, body, recipients=[recipient])
+            last_heartbeat_date = today
+            print("heartbeat sent")
+
     if state is not None and state.get("extractDatetime") == extract_datetime:
+        # Still persist the heartbeat stamp, or a run that only sent a
+        # heartbeat would forget it and re-send on the very next run.
+        if not args.dry_run and last_heartbeat_date != state.get("last_heartbeat_date"):
+            write_state(
+                extract_datetime, state["units"], last_alert_date, last_heartbeat_date
+            )
         print(f"no-op: extract unchanged ({extract_datetime})")
         return
 
@@ -332,7 +427,7 @@ def main():
     hits = diff(current, state, products, watched_boards)
 
     if state is None:
-        write_state(extract_datetime, current)
+        write_state(extract_datetime, current, None, last_heartbeat_date)
         print("initialized state")
         return
 
@@ -340,7 +435,6 @@ def main():
     # it into the baseline silently rather than send again (accepted: we may
     # miss an afternoon update).
     extract_date = extract_datetime[:10]
-    last_alert_date = state.get("last_alert_date")
 
     if hits:
         subject, body, html = format_email(hits, extract_datetime, load_stores())
@@ -353,7 +447,7 @@ def main():
             print(f"{len(hits)} hit(s) but already alerted on {extract_date}; skipping email")
 
     if not args.dry_run:
-        write_state(extract_datetime, current, last_alert_date)
+        write_state(extract_datetime, current, last_alert_date, last_heartbeat_date)
 
     print(f"{len(hits)} hit(s); state {'unchanged (dry-run)' if args.dry_run else 'updated'}")
 

@@ -248,5 +248,89 @@ class ValidateConfigTests(unittest.TestCase):
         self.assertIn("5-digit zero-padded", buf.getvalue())
 
 
+class ShouldHeartbeatTests(unittest.TestCase):
+    def test_never_sent_is_due(self):
+        self.assertTrue(check.should_heartbeat(None, "2026-08-06"))
+
+    def test_exactly_interval_is_due(self):
+        self.assertTrue(check.should_heartbeat("2026-07-30", "2026-08-06"))
+
+    def test_older_than_interval_is_due(self):
+        self.assertTrue(check.should_heartbeat("2026-07-01", "2026-08-06"))
+
+    def test_within_interval_is_not_due(self):
+        self.assertFalse(check.should_heartbeat("2026-07-31", "2026-08-06"))
+
+    def test_same_day_is_not_due(self):
+        self.assertFalse(check.should_heartbeat("2026-08-06", "2026-08-06"))
+
+    def test_unparseable_date_is_due(self):
+        # Corrupt state should surface as a heartbeat, not a silent skip.
+        self.assertTrue(check.should_heartbeat("not-a-date", "2026-08-06"))
+
+
+class HeartbeatRecipientTests(unittest.TestCase):
+    def test_reads_env_and_strips(self):
+        import os
+        os.environ["HEARTBEAT_RECIPIENT"] = "  someone@example.com  "
+        try:
+            self.assertEqual(check.heartbeat_recipient(), "someone@example.com")
+        finally:
+            del os.environ["HEARTBEAT_RECIPIENT"]
+
+    def test_unset_returns_empty(self):
+        import os
+        os.environ.pop("HEARTBEAT_RECIPIENT", None)
+        self.assertEqual(check.heartbeat_recipient(), "")
+
+
+class FormatHeartbeatTests(unittest.TestCase):
+    def test_fresh_feed_is_all_clear(self):
+        subject, body = check.format_heartbeat(
+            "2026-08-06 11:04:13", "2026-08-06", PRODUCTS, sorted(WATCHED), None)
+        self.assertEqual(subject, "nc-bourbon-finder: weekly heartbeat")
+        self.assertIn("2026-08-06 11:04:13", body)
+        self.assertIn("2 products across 2 boards", body)
+        self.assertIn("Last alert: never", body)
+        self.assertNotIn("WARNING", body)
+
+    def test_reports_last_alert_date_when_set(self):
+        _, body = check.format_heartbeat(
+            "2026-08-06 11:04:13", "2026-08-06", PRODUCTS, sorted(WATCHED), "2026-07-22")
+        self.assertIn("Last alert: 2026-07-22", body)
+
+    def test_yesterday_extract_still_all_clear(self):
+        # The extract lands ~11:04 ET; a run before that legitimately sees
+        # yesterday's. One day behind is not staleness.
+        subject, body = check.format_heartbeat(
+            "2026-08-05 11:04:10", "2026-08-06", PRODUCTS, sorted(WATCHED), None)
+        self.assertEqual(subject, "nc-bourbon-finder: weekly heartbeat")
+        self.assertNotIn("WARNING", body)
+
+    def test_stale_feed_warns_in_subject_and_body(self):
+        subject, body = check.format_heartbeat(
+            "2026-07-28 11:04:13", "2026-08-06", PRODUCTS, sorted(WATCHED), None)
+        self.assertIn("stale", subject)
+        self.assertIn("WARNING", body)
+        self.assertIn("9 days", body)
+
+
+class HeartbeatStateTests(unittest.TestCase):
+    def test_last_heartbeat_date_written_and_omitted_when_none(self):
+        import json
+        import tempfile
+        orig = check.STATE_PATH
+        try:
+            check.STATE_PATH = Path(tempfile.mkdtemp()) / "latest.json"
+            check.write_state("2026-08-06 11:04:13", {"k": 1}, None, "2026-08-06")
+            with check.STATE_PATH.open() as f:
+                self.assertEqual(json.load(f)["last_heartbeat_date"], "2026-08-06")
+            check.write_state("2026-08-06 11:04:13", {"k": 1}, None, None)
+            with check.STATE_PATH.open() as f:
+                self.assertNotIn("last_heartbeat_date", json.load(f))
+        finally:
+            check.STATE_PATH = orig
+
+
 if __name__ == "__main__":
     unittest.main()

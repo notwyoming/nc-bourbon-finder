@@ -32,16 +32,27 @@ jobs:
           GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           ALERT_RECIPIENTS: ${{ secrets.ALERT_RECIPIENTS }}
+          # Single address for the weekly liveness email. Kept in a secret, not
+          # config.toml, because this repo is public. Unset = heartbeat off.
+          HEARTBEAT_RECIPIENT: ${{ secrets.HEARTBEAT_RECIPIENT }}
         run: python check.py
 
       - name: Commit state if changed
         run: |
           if [[ -n "$(git status --porcelain state/latest.json)" ]]; then
             extract=$(python -c "import json; print(json.load(open('state/latest.json'))['extractDatetime'])")
+            # A heartbeat-only run leaves the extract untouched, so labelling it
+            # "extract <same datetime>" would duplicate the previous message.
+            prev=$(git show HEAD:state/latest.json 2>/dev/null | python -c "import json,sys; print(json.load(sys.stdin)['extractDatetime'])" 2>/dev/null || true)
+            if [[ "$extract" == "$prev" ]]; then
+              msg="chore(state): heartbeat $(date -u +%F)"
+            else
+              msg="chore(state): extract $extract"
+            fi
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add state/latest.json
-            git commit -m "chore(state): extract $extract"
+            git commit -m "$msg"
             git pull --rebase origin "${GITHUB_REF_NAME}"
             git push
           fi
