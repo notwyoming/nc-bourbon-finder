@@ -1,6 +1,6 @@
 {
-  "extractDatetime": "2026-10-27 11:06:56",
-  "last_alert_date": "2026-10-26",
+  "extractDatetime": "2026-10-28 11:06:53",
+  "last_alert_date": "2026-10-28",
   "units": {
     "27090|Albemarle ABC Board": 18,
     "27090|Alexander County ABC Board": 12,
@@ -13,6 +13,7 @@
     "27090|Bunn ABC Board": 12,
     "27090|Burnsville ABC Board": 12,
     "27090|Camden County ABC Board": 6,
+    "27090|Chowan County ABC Board": 12,
     "27090|Clay County ABC Board": 12,
     "27090|Clinton ABC Board": 12,
     "27090|Dobson ABC Board": 12,
@@ -23,7 +24,7 @@
     "27090|Granite Falls ABC Board": 12,
     "27090|Granville County ABC Board": 24,
     "27090|Greene County ABC Board": 12,
-    "27090|Greensboro ABC Board": -18,
+    "27090|Greensboro ABC Board": 0,
     "27090|Hamlet ABC Board": 12,
     "27090|Hertford ABC Board": 12,
     "27090|Hertford County ABC Board": 12,
@@ -110,7 +111,7 @@
     "27169|Granite Falls ABC Board": 24,
     "27169|Granville County ABC Board": 54,
     "27169|Greene County ABC Board": 18,
-    "27169|Greensboro ABC Board": -18,
+    "27169|Greensboro ABC Board": 0,
     "27169|Hamlet ABC Board": 30,
     "27169|Hertford ABC Board": 24,
     "27169|Hertford County ABC Board": 36,
@@ -173,6 +174,7 @@
     "27169|West Jefferson ABC Board": 36,
     "27169|Whiteville ABC Board": 30,
     "27169|Wilkesboro ABC Board": 42,
+    "27169|Woodfin ABC Board": 6,
     "27169|Yadkin Valley ABC Board": 36,
     "27169|Youngsville ABC Board": 6
   }
