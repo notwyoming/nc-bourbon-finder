@@ -1,5 +1,5 @@
 {
-  "extractDatetime": "2026-11-24 10:07:21",
+  "extractDatetime": "2026-11-25 10:07:11",
   "last_alert_date": "2026-11-17",
   "units": {
     "27090|Albemarle ABC Board": 18,
@@ -44,6 +44,7 @@
     "27090|Greene County ABC Board": 12,
     "27090|Greensboro ABC Board": 138,
     "27090|Hamlet ABC Board": 12,
+    "27090|Hertford ABC Board": 12,
     "27090|Hertford County ABC Board": 12,
     "27090|High Country ABC Board": 18,
     "27090|High Point ABC Board": 66,
@@ -156,6 +157,7 @@
     "27169|Greene County ABC Board": 18,
     "27169|Greensboro ABC Board": 420,
     "27169|Hamlet ABC Board": 30,
+    "27169|Hertford ABC Board": 6,
     "27169|Hertford County ABC Board": 36,
     "27169|High Country ABC Board": 42,
     "27169|High Point ABC Board": 138,
